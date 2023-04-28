@@ -404,6 +404,9 @@ exit(int status)
     if(kt != mykthread()) {
       acquire(&kt->lock);
       if(kt->state != TUNUSED) {
+        /**
+         * TODO: 2.3: here we should use kthread exit
+        */
         kt->xstate = status;
         kt->state = TZOMBIE;
       }
@@ -411,6 +414,9 @@ exit(int status)
     }
   }
 
+  /**
+   * TODO: 2.3: here we should use kthread exit
+  */
   acquire(&mykthread()->lock);
   mykthread()->state = TZOMBIE;
   release(&mykthread()->lock);
