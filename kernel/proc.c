@@ -323,7 +323,7 @@ fork(void)
 
   // Cause fork to return 0 in the child.
   nkt->trapframe->a0 = 0;
-  nkt->chan = kt->chan; //pass channel to child
+  nkt->chan = kt->chan; //pass channel to child -- TODO: might be problem
 
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
@@ -409,6 +409,7 @@ exit(int status)
         */
         kt->xstate = status;
         kt->state = TZOMBIE;
+        kt->killed = 1;
       }
       release(&kt->lock);
     }
@@ -426,7 +427,6 @@ exit(int status)
 
   release(&p->lock);
   release(&wait_lock);
-
 
   // Jump into the scheduler, never to return.
   acquire(&mykthread()->lock);
@@ -674,6 +674,12 @@ setkilled(struct proc *p)
 {
   acquire(&p->lock);
   p->killed = 1;
+  struct kthread *kt;
+  for(kt = p->kthread; kt < &p->kthread[NKT]; kt++){
+    acquire(&kt->lock);  
+    kt->killed = 1;
+    release(&kt->lock);
+  }
   release(&p->lock);
 }
 

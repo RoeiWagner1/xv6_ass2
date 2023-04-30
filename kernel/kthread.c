@@ -75,10 +75,10 @@ struct kthread* allocthread(struct proc* p)
 found:
   kt->tid = alloctid(p);
   kt->state = TUSED;
-  kt->trapframe = get_kthread_trapframe(p, kt); 
+  kt->trapframe = get_kthread_trapframe(p, kt);
   memset(&kt->context, 0, sizeof(kt->context));
   kt->context.ra = (uint64)forkret;
-  kt->context.sp = kt->kstack + PGSIZE;
+  kt->context.sp = kt->kstack + PGSIZE; 
   return kt;
 }
 
@@ -95,6 +95,108 @@ freethread(struct kthread* kt)
   kt->killed = 0;
   kt->xstate = 0;
   kt->trapframe = 0;
-
   kt->state = TUNUSED;
+}
+
+int 
+kthread_create(void *(*start_func)(), void *stack, uint stack_size){
+  struct kthread *kt;
+  if((kt = allocthread(myproc())) == 0){
+    return -1;
+  }
+  
+  kt->state = TRUNNABLE;
+  // kt->kstack = (uint64) stack; 
+  kt->trapframe->epc = (uint64) start_func;
+  kt->trapframe->sp = (uint64) (stack + stack_size); 
+  release(&kt->lock);
+  return kt->tid;
+}
+
+//Find the kernel thread with the same tid.
+struct kthread*
+find_kthread_by_tid(int ktid){
+  struct kthread *kt;
+  struct proc *p = myproc();
+  acquire(&p->lock);
+  for (kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
+    acquire(&kt->lock);
+    if(kt->tid == ktid){
+      release(&kt->lock);
+      release(&p->lock);
+      return kt;
+    }
+    else{
+      release(&kt->lock);
+    }
+  }
+  release(&p->lock);
+  return 0;
+}
+
+int
+kthread_kill(int ktid){
+  struct kthread *kt;
+  if((kt = find_kthread_by_tid(ktid)) == 0){
+    return -1;
+  }
+  acquire(&kt->lock);
+  kt->killed = 1;
+  if(kt->state == TSLEEPING) {
+    kt->state = TRUNNABLE;
+  }
+  release(&kt->lock); 
+  return 0;
+}
+
+int
+last_process_kthread(struct kthread *kt){
+  struct proc *p = kt->process;
+  struct kthread* t;
+  acquire(&p->lock);
+  for(t = p->kthread; t < &p->kthread[NKT]; t++){
+    acquire(&t->lock);
+    if(t->state != TUNUSED && t->state != TZOMBIE && t != kt){
+      release(&t->lock);
+      release(&p->lock);
+      return 0;
+    }
+    release(&t->lock);
+  }
+  release(&p->lock);
+  return 1;
+}
+
+void
+kthread_exit(int status){
+  struct kthread *kt = mykthread();
+  acquire(&kt->lock);
+  kt->xstate = status;
+  kt->state = TZOMBIE;
+  // if(last_process_kthread(kt)){
+  //   release(&kt->lock);
+  //   exit(0);  // Whose status was sent to exit?
+  // } 
+  wakeup(kt);
+  release(&kt->lock);
+}
+
+int 
+kthread_join(int ktid, int *status){
+  struct kthread *kt;
+  struct proc *p = myproc();
+
+  if((kt = find_kthread_by_tid(ktid)) == 0){
+      return -1;
+  }
+  
+  acquire(&kt->lock);
+  if(kt->xstate != TZOMBIE){
+    sleep(kt, &p->lock);
+  }
+
+  status = &kt->xstate;
+  freethread(kt);
+  release(&kt->lock);
+  return 0;
 }
