@@ -119,6 +119,7 @@ int                 kthread_create(void *(*)(), void *, uint);
 int                 kthread_kill(int);
 void                kthread_exit(int);
 int                 kthread_join(int, int*);
+int                 kthread_killed(struct kthread*);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
