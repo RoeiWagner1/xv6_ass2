@@ -111,7 +111,18 @@ exec(char *path, char **argv)
   if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0)
     goto bad;
 
- 
+
+  /**
+  * After this line nothing should go wrong
+  */
+  struct kthread *t;
+  for(t = p->kthread; t < &p->kthread[NKT]; t++){
+    if(t != mykthread() && t->state != TUNUSED){
+      freethread(kt);
+    }
+  }
+
+
   // arguments to user main(argc, argv)
   // argc is returned via the system call return
   // value, which goes in a0.
@@ -130,17 +141,6 @@ exec(char *path, char **argv)
   kt->trapframe->epc = elf.entry;  // initial program counter = main
   kt->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
-
-  /**
-  * After this line nothing should go wrong
-  * TODO: use kthread exit on all process threads
-  */
-  struct kthread *kth;
-  for(kth = p->kthread; kth < &p->kthread[NKT]; kth++){
-    if(kth != mykthread()){
-      kthread_exit(0);
-    }
-  }
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

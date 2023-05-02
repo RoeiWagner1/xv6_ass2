@@ -118,19 +118,16 @@ struct kthread*
 find_kthread_by_tid(int ktid){
   struct kthread *kt;
   struct proc *p = myproc();
-  acquire(&p->lock);
-  for (kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
+  for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
     acquire(&kt->lock);
     if(kt->tid == ktid){
       release(&kt->lock);
-      release(&p->lock);
       return kt;
     }
     else{
       release(&kt->lock);
     }
   }
-  release(&p->lock);
   return 0;
 }
 
@@ -151,34 +148,42 @@ kthread_kill(int ktid){
 
 int
 last_process_kthread(struct kthread *kt){
-  struct proc *p = kt->process;
   struct kthread* t;
-  acquire(&p->lock);
+  struct proc *p = myproc();
   for(t = p->kthread; t < &p->kthread[NKT]; t++){
-    acquire(&t->lock);
-    if(t->state != TUNUSED && t->state != TZOMBIE && t != kt){
+    if(t != kt){
+      acquire(&t->lock);
+      if(t->state != TUNUSED && t->state != TZOMBIE){
+        release(&t->lock);
+        return 0;
+      }
       release(&t->lock);
-      release(&p->lock);
-      return 0;
     }
-    release(&t->lock);
   }
-  release(&p->lock);
   return 1;
 }
 
 void
 kthread_exit(int status){
   struct kthread *kt = mykthread();
+  struct proc *p = myproc();
+
+  if(last_process_kthread(kt)){
+    exit(status);
+  }
+  
   acquire(&kt->lock);
   kt->xstate = status;
   kt->state = TZOMBIE;
-  // if(last_process_kthread(kt)){
-  //   release(&kt->lock);
-  //   exit(0);  // Whose status was sent to exit?
-  // } 
-  wakeup(kt);
   release(&kt->lock);
+  
+  acquire(&p->lock); 
+  wakeup(kt);
+  release(&p->lock);
+  
+  acquire(&kt->lock);
+  sched();
+  panic("zombie exit");
 }
 
 int 
@@ -192,11 +197,17 @@ kthread_join(int ktid, int *status){
   
   acquire(&kt->lock);
   if(kt->xstate != TZOMBIE){
+    acquire(&p->lock); 
     sleep(kt, &p->lock);
   }
 
-  status = &kt->xstate;
-  freethread(kt);
+  if(status != 0 && copyout(kt->process->pagetable, (uint64) status, (char *)&kt->xstate,
+                                      sizeof(kt->xstate)) < 0) {
+    release(&kt->lock);
+    return -1;
+  }
+  
   release(&kt->lock);
+  freethread(kt);
   return 0;
 }

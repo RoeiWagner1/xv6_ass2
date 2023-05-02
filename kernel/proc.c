@@ -373,9 +373,22 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
-
+  
   if(p == initproc)
     panic("init exiting");
+
+  struct kthread* kt;
+  for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
+    if(kt != mykthread()) {
+      acquire(&kt->lock);
+      if(kt->state != TUNUSED && kt->state != TZOMBIE) {
+        kt->killed = 1;
+        release(&kt->lock);
+        kthread_join(kt->tid, 0);
+      }
+      release(&kt->lock);
+    }
+  }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
@@ -398,33 +411,14 @@ exit(int status)
 
   // Parent might be sleeping in wait().
   wakeup(p->parent);
-  
-  acquire(&p->lock);
-  for(struct kthread* kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
-    if(kt != mykthread()) {
-      acquire(&kt->lock);
-      if(kt->state != TUNUSED) {
-        /**
-         * TODO: 2.3: here we should use kthread exit
-        */
-        kt->xstate = status;
-        kt->state = TZOMBIE;
-        kt->killed = 1;
-      }
-      release(&kt->lock);
-    }
-  }
 
-  /**
-   * TODO: 2.3: here we should use kthread exit
-  */
   acquire(&mykthread()->lock);
   mykthread()->state = TZOMBIE;
   release(&mykthread()->lock);
 
+  acquire(&p->lock);
   p->xstate = status;
   p->state = ZOMBIE;
-
   release(&p->lock);
   release(&wait_lock);
 
@@ -621,10 +615,9 @@ sleep(void *chan, struct spinlock *lk)
 void
 wakeup(void *chan)
 {
-  struct proc *p;
+  struct proc *p = myproc();
   struct kthread *kt;
   for(p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);  //TODO: maybe not acquire lock
     if(p->state == USED) {
       for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {     //find threads sleeping on chan
         if(kt != mykthread()) {
@@ -636,7 +629,6 @@ wakeup(void *chan)
         }
       }
     }
-    release(&p->lock);
   }
 }
 
