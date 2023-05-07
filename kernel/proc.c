@@ -499,22 +499,26 @@ scheduler(void)
     intr_on();
 
     for(p = proc; p < &proc[NPROC]; p++) {
-      if(p->state == USED) {
-        for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
-          acquire(&kt->lock);
-          if(kt->state == TRUNNABLE) {
-            // Switch to chosen thread.  It is the thread's job
-            // to release its lock and then reacquire it
-            // before jumping back to us.
-            kt->state = TRUNNING;
-            c->thread = kt;
-            swtch(&c->context, &kt->context);
-            // Process is done running for now.
-            // It should have changed its p->state before coming back.
-            c->thread = 0;
-          }
-          release(&kt->lock);
+      acquire(&p->lock);
+      if(p->state == UNUSED) {
+        release(&p->lock);
+        continue;
+      } 
+      release(&p->lock); 
+      for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
+        acquire(&kt->lock);
+        if(kt->state == TRUNNABLE) {
+          // Switch to chosen thread.  It is the thread's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          kt->state = TRUNNING;
+          c->thread = kt;
+          swtch(&c->context, &kt->context);
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->thread = 0;
         }
+          release(&kt->lock);
       }
     }
   }
