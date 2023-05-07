@@ -194,20 +194,34 @@ kthread_join(int ktid, int *status){
   if((kt = find_kthread_by_tid(ktid)) == 0){
       return -1;
   }
-  
-  acquire(&kt->lock);
-  if(kt->xstate != TZOMBIE){
-    acquire(&p->lock); 
+
+  acquire(&p->lock);
+  for(;;){
+    if(kt->state == TZOMBIE){
+      acquire(&kt->lock);
+      if(status != 0 && copyout(kt->process->pagetable, (uint64) status, (char *)&kt->xstate,
+                                          sizeof(kt->xstate)) < 0) {
+        release(&kt->lock);
+        release(&p->lock);
+        return -1;
+      }
+
+      release(&kt->lock);
+      freethread(kt);
+      release(&p->lock);
+      return 0;
+    }
+
     sleep(kt, &p->lock);
   }
+}
 
-  if(status != 0 && copyout(kt->process->pagetable, (uint64) status, (char *)&kt->xstate,
-                                      sizeof(kt->xstate)) < 0) {
-    release(&kt->lock);
-    return -1;
-  }
-  
+int
+kthread_killed(struct kthread *kt)
+{
+  int k;
+  acquire(&kt->lock);
+  k = kt->killed;
   release(&kt->lock);
-  freethread(kt);
-  return 0;
+  return k;
 }
