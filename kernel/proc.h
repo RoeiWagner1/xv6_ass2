@@ -13,6 +13,7 @@ struct proc {
   int killed;                  // If non-zero, have been killed
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
+  int first_thread_exit_flag; // only 1 thread can call exit fucntion
 
   struct kthread kthread[NKT];        // kthread group table
   struct trapframe *base_trapframes;  // data page for trampolines

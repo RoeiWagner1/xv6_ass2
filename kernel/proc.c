@@ -128,6 +128,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->first_thread_exit_flag = 0;
 
   acquire(&p->threadsId_lock);
   p->threadsId = 1;
@@ -180,6 +181,7 @@ freeproc(struct proc *p)
   p->name[0] = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->first_thread_exit_flag = 0;
   p->state = UNUSED;
 }
 
@@ -373,60 +375,69 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
-  
+
   if(p == initproc)
     panic("init exiting");
-
-  struct kthread* kt;
-  for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
-    if(kt != mykthread()) {
-      acquire(&kt->lock);
-      if(kt->state != TUNUSED && kt->state != TZOMBIE) {
-        kt->killed = 1;
-        release(&kt->lock);
-        kthread_join(kt->tid, 0);
-      }
-      release(&kt->lock);
-    }
-  }
-
-  // Close all open files.
-  for(int fd = 0; fd < NOFILE; fd++){
-    if(p->ofile[fd]){
-      struct file *f = p->ofile[fd];
-      fileclose(f);
-      p->ofile[fd] = 0;
-    }
-  }
-
-  begin_op();
-  iput(p->cwd);
-  end_op();
-  p->cwd = 0;
-
-  acquire(&wait_lock);
-
-  // Give any children to init.
-  reparent(p);
-
-  // Parent might be sleeping in wait().
-  wakeup(p->parent);
-
-  acquire(&mykthread()->lock);
-  mykthread()->state = TZOMBIE;
-  release(&mykthread()->lock);
-
+  
   acquire(&p->lock);
-  p->xstate = status;
-  p->state = ZOMBIE;
-  release(&p->lock);
-  release(&wait_lock);
+  if(p->first_thread_exit_flag != 0){
+    release(&p->lock);
+    kthread_exit(0);
+  }
+  else {
+    p->first_thread_exit_flag = 1;
+    release(&p->lock);
+    struct kthread* kt;
+    for(kt = p->kthread; kt < &p->kthread[NKT]; kt++) {
+      if(kt != mykthread()) {
+        acquire(&kt->lock);
+        if(kt->state != TUNUSED && kt->state != TZOMBIE) {
+          kt->killed = 1;
+          release(&kt->lock);
+          kthread_join(kt->tid, 0);
+        }
+        release(&kt->lock);
+      }
+    }
 
-  // Jump into the scheduler, never to return.
-  acquire(&mykthread()->lock);
+    // Close all open files.
+    for(int fd = 0; fd < NOFILE; fd++){
+      if(p->ofile[fd]){
+        struct file *f = p->ofile[fd];
+        fileclose(f);
+        p->ofile[fd] = 0;
+      }
+    }
 
-  sched();
-  panic("zombie exit");
+    begin_op();
+    iput(p->cwd);
+    end_op();
+    p->cwd = 0;
+
+    acquire(&wait_lock);
+
+    // Give any children to init.
+    reparent(p);
+
+    // Parent might be sleeping in wait().
+    wakeup(p->parent);
+
+    acquire(&mykthread()->lock);
+    mykthread()->state = TZOMBIE;
+    release(&mykthread()->lock);
+
+    acquire(&p->lock);
+    p->xstate = status;
+    p->state = ZOMBIE;
+    release(&p->lock);
+    release(&wait_lock);
+
+    // Jump into the scheduler, never to return.
+    acquire(&mykthread()->lock);
+
+    sched();
+    panic("zombie exit");
+  }
 }
 
 // Wait for a child process to exit and return its pid.
